@@ -191,13 +191,17 @@ static uint64_t nchunks, committed, next_chunk;
 typedef struct { int ready; uint64_t surv,fpass; int nh; char (*h)[160]; } chres;
 static chres ring[RING];
 static void save_ckpt(const char*cp){   // mu kilidi altinda cagrilir
-  char tmp[600]; snprintf(tmp,sizeof tmp,"%s.tmp",cp); FILE*f=fopen(tmp,"w"); if(!f) return;
+  char tmp[600]; snprintf(tmp,sizeof tmp,"%s.tmp",cp); FILE*f=fopen(tmp,"wb"); if(!f) return;
   fprintf(f,"%d %llu %llu %llu %llu %llu %d\n",APPVER,(unsigned long long)k0,(unsigned long long)k1,(unsigned long long)(k0+committed*CH),(unsigned long long)surv,(unsigned long long)fpass,nh);
   for(int i=0;i<nh;i++) fprintf(f,"%s\n",hits[i]);
-  fclose(f); rename(tmp,cp);
+  fclose(f);
+#ifdef _WIN32
+  remove(cp);   // Windows: rename does not overwrite
+#endif
+  rename(tmp,cp);
 }
 static int load_ckpt(const char*cp){
-  FILE*f=fopen(cp,"r"); if(!f) return 0; int v,n; unsigned long long a,b,c,d,e;
+  FILE*f=fopen(cp,"rb"); if(!f) return 0; int v,n; unsigned long long a,b,c,d,e;
   if(fscanf(f,"%d %llu %llu %llu %llu %llu %d\n",&v,&a,&b,&c,&d,&e,&n)!=7||v!=APPVER||a!=k0||b!=k1||n<0||n>=MAXHITS||c<k0||(c-k0)%CH){fclose(f);return 0;}
   nh=0; char line[200]; for(int i=0;i<n;i++){ if(!fgets(line,sizeof line,f)){fclose(f);nh=0;return 0;} line[strcspn(line,"\n")]=0; strncpy(hits[nh++],line,159); }
   committed=(c-k0)/CH; surv=d; fpass=e; fclose(f); return 1;
@@ -284,7 +288,7 @@ int main(int argc,char**argv){
   }
   pthread_mutex_unlock(&mu);
   for(int i=0;i<nthreads;i++) pthread_join(th[i],0);
-  FILE*fo=fopen(outp,"w"); if(!fo) return 2;
+  FILE*fo=fopen(outp,"wb"); if(!fo) return 2;
   fprintf(fo,"symm27 v%d k=[%llu,%llu] dobs=%zu surv=%llu fermat1=%llu hits=%d\n",APPVER,(unsigned long long)k0,(unsigned long long)k1,nd,(unsigned long long)surv,(unsigned long long)fpass,nh);
   write_hits(fo,hits,nh);
   fclose(fo); remove(cp);

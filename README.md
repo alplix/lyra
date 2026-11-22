@@ -47,3 +47,7 @@ symm27 v2 k=[a,b] dobs=286720 surv=... fermat1=... hits=...
 ## Licence
 
 GPL-3.0
+
+## Release builds
+
+`tools/build_boinc_target.sh` compiles the BOINC libraries (from a BOINC source tree) and Lyra for one target, fully static for Linux and Windows; `tools/build_all_targets.sh` runs it for Linux x86_64, i686, aarch64, armhf, ppc64le, riscv64 and Windows x86_64, x86 (paths such as `/root/boinc` and `/opt/llvm-mingw` are those of the build container). Windows arm64 uses llvm-mingw, Android aarch64 the NDK (dynamic PIE, needs only libc, libm, libdl), macOS builds use Apple clang with `-mmacosx-version-min=11.0`. All builds print the same result file for the same input. Result files are written in binary mode, so they are byte-identical on every platform.
