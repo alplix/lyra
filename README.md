@@ -9,7 +9,7 @@ Such a tuplet contains a central 11-tuplet (offsets 0, 30, 48, 54, 78, 84, 90, 1
 1. `dob` are the 286,720 residues mod 37# that are compatible with the 27-pattern. The program builds them itself (Chinese remainder theorem), no data file is needed.
 2. Stage 1: bit-mask sieve over all `dob` for primes 41..199.
 3. Stage 2: fast integer sieve with primes up to 20,000.
-4. Stage 3: Fermat base-2 test, then exact verification with GMP (primality and "consecutive" check, then symmetric extension).
+4. Stage 3: Fermat base-2 test (Montgomery arithmetic on 128-bit integers), then verification of every hit with Miller-Rabin (20 prime bases; deterministic below 3.3e24, probabilistic above) and the "consecutive" check, then symmetric extension.
 
 The output is deterministic and independent of thread count and of CPU or GPU, so results can be compared bit for bit.
 
@@ -17,12 +17,12 @@ The output is deterministic and independent of thread count and of CPU or GPU, s
 
 - `symm27.c`: CPU version, one process, `--nthreads N` threads sharing the sieve tables (about 150 MB RAM). Checkpointing, optional BOINC API (`-DUSE_BOINC`).
 - `symm27_gpu.c`: OpenCL version with the same input, output and checkpoint format. Memory-adaptive batch size.
-- `test_verify.c`: unit tests for the verification code.
+- `test_verify.c`: unit tests for the verification code. `test_arith.c`: cross-checks the 128-bit arithmetic against GMP (test only; needs GMP).
 - `gendob.py`: reference generator for the `dob` residues.
 
 ## Build
 
-Needs GMP (and OpenCL for the GPU version).
+Needs only a C compiler and pthreads (and OpenCL for the GPU version). No external libraries; `__int128` is used when available, with a portable fallback for 32-bit targets (`-DLYRA_NO_INT128` forces it).
 
 ```
 make standalone      # CPU

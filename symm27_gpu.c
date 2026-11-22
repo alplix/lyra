@@ -191,7 +191,7 @@ int main(int argc,char**argv){
       u2*cand=malloc((size_t)(cnt?cnt:1)*8); size_t nc=0;
       for(cl_uint j=0;j<cnt;j++){ if(Z->hrs[j]&1) lf++; if(Z->hrs[j]&2) cand[nc++]=Z->hsv[j]; }
       qsort(cand,nc,8,cmp_u2);
-      for(size_t j=0;j<nc;j++){ u128 X=(u128)(Z->a+cand[j].a)*P37+dob[cand[j].b]; int v=verify(X);
+      for(size_t j=0;j<nc;j++){ n128 X=mkX(Z->a+cand[j].a,dob[cand[j].b]); int v=verify(X);
         if(v){ if(lh==hcap){ hcap=hcap?hcap*2:4; H=realloc(H,(size_t)hcap*160); } char s[64]; pr128(s,X);
           snprintf(H[lh++],160,"%s %d",s,v); } }
       free(cand);

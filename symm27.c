@@ -6,13 +6,11 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
-#include <gmp.h>
 #include <pthread.h>
 #include <time.h>
 #ifdef USE_BOINC
 #include "boinc_api.h"
 #endif
-typedef unsigned __int128 u128;
 #ifndef PBIT
 #define PBIT 200
 #endif
@@ -40,42 +38,114 @@ static void gen_dob(void){
   qsort(res,n,8,cmpu); dob=res; nd=n;
 }
 // ---- yardimcilar ----
-static int isp(const mpz_t n){ return mpz_probab_prime_p(n,1)!=0; }
-static int fermat2(const mpz_t n, mpz_t a, mpz_t e, mpz_t r){ mpz_sub_ui(e,n,1); mpz_set_ui(a,2); mpz_powm(r,a,e,n); return mpz_cmp_ui(r,1)==0; }
-static void u128_to_mpz(mpz_t r, u128 v){ mpz_set_ui(r,(uint64_t)(v>>64)); mpz_mul_2exp(r,r,64); mpz_add_ui(r,r,(uint64_t)v); }
-static void pr128(char *s, u128 v){ char t[64]; int n=0; if(!v){strcpy(s,"0");return;} while(v){t[n++]='0'+(int)(v%10); v/=10;} for(int i=0;i<n;i++) s[i]=t[n-1-i]; s[n]=0; }
-static int consecutive(const mpz_t x,const int*pt,int n,mpz_t t){ for(int i=0;i+1<n;i++) for(int d=pt[i]+2;d<pt[i+1];d+=2){ mpz_add_ui(t,x,d); if(isp(t)) return 0; } return 1; }
+// 128-bit tamsayi: GMP yok, __int128 zorunlu degil (32-bit hedeflerde de ayni sonuc)
+typedef struct { uint64_t lo, hi; } n128;
+static inline void mul64(uint64_t a,uint64_t b,uint64_t*hi,uint64_t*lo){
+#if defined(__SIZEOF_INT128__) && !defined(LYRA_NO_INT128)
+  unsigned __int128 p=(unsigned __int128)a*b; *lo=(uint64_t)p; *hi=(uint64_t)(p>>64);
+#else
+  uint64_t a0=(uint32_t)a,a1=a>>32,b0=(uint32_t)b,b1=b>>32;
+  uint64_t p00=a0*b0,p01=a0*b1,p10=a1*b0,p11=a1*b1;
+  uint64_t mid=(p00>>32)+(uint32_t)p01+(uint32_t)p10;
+  *lo=(mid<<32)|(uint32_t)p00; *hi=p11+(p01>>32)+(p10>>32)+(mid>>32);
+#endif
+}
+static inline uint64_t mulhi64(uint64_t a,uint64_t b){ uint64_t h,l; mul64(a,b,&h,&l); return h; }
+static inline n128 mk(uint64_t lo){ n128 r={lo,0}; return r; }
+static inline n128 add_u(n128 a,uint64_t d){ n128 r; r.lo=a.lo+d; r.hi=a.hi+(r.lo<a.lo); return r; }
+static inline n128 sub_u(n128 a,uint64_t d){ n128 r; r.lo=a.lo-d; r.hi=a.hi-(a.lo<d); return r; }
+static inline n128 sub128(n128 a,n128 b){ n128 r; r.lo=a.lo-b.lo; r.hi=a.hi-b.hi-(a.lo<b.lo); return r; }
+static inline int ge128(n128 a,n128 b){ return a.hi>b.hi||(a.hi==b.hi&&a.lo>=b.lo); }
+static inline int eq128(n128 a,n128 b){ return a.lo==b.lo&&a.hi==b.hi; }
+static inline n128 dbl128(n128 a){ n128 r; r.hi=(a.hi<<1)|(a.lo>>63); r.lo=a.lo<<1; return r; }
+static n128 mkX(uint64_t k,uint64_t d){ uint64_t h,l; mul64(k,P37,&h,&l); n128 r={l,h}; return add_u(r,d); }
+static void pr128(char *s, n128 v){
+  uint32_t w[4]={(uint32_t)v.lo,(uint32_t)(v.lo>>32),(uint32_t)v.hi,(uint32_t)(v.hi>>32)}; char t[48]; int n=0;
+  for(;;){ if(!(w[0]|w[1]|w[2]|w[3])) break; uint64_t rem=0;
+    for(int i=3;i>=0;i--){ uint64_t cur=(rem<<32)|w[i]; w[i]=(uint32_t)(cur/10); rem=cur%10; }
+    t[n++]=(char)('0'+rem); }
+  if(!n) t[n++]='0';
+  for(int i=0;i<n;i++) s[i]=t[n-1-i]; s[n]=0;
+}
+static n128 parse128(const char*s){ n128 v={0,0};
+  while(*s>='0'&&*s<='9'){ uint64_t h,l; mul64(v.lo,10,&h,&l); v.hi=v.hi*10+h; v.lo=l; v=add_u(v,(uint64_t)(*s++-'0')); }
+  return v; }
+// Montgomery (R=2^128), n tek ve n < 2^127
+typedef struct { n128 n; uint64_t ninv; n128 one, r2; } mont;
+static n128 mmul(n128 a,n128 b,const mont*M){
+  uint64_t A[2]={a.lo,a.hi},B[2]={b.lo,b.hi},N[2]={M->n.lo,M->n.hi},p[5]={0,0,0,0,0};
+  for(int i=0;i<2;i++){ uint64_t carry=0;
+    for(int j=0;j<2;j++){ uint64_t h,l; mul64(A[j],B[i],&h,&l); uint64_t t=p[i+j]+l; uint64_t c=t<l; t+=carry; c+=t<carry; p[i+j]=t; carry=h+c; }
+    p[i+2]+=carry; }
+  for(int i=0;i<2;i++){ uint64_t m=p[i]*M->ninv, carry=0;
+    for(int j=0;j<2;j++){ uint64_t h,l; mul64(m,N[j],&h,&l); uint64_t t=p[i+j]+l; uint64_t c=t<l; t+=carry; c+=t<carry; p[i+j]=t; carry=h+c; }
+    for(int k=i+2;k<5&&carry;k++){ p[k]+=carry; carry=p[k]<carry; } }
+  n128 r={p[2],p[3]}; if(ge128(r,M->n)) r=sub128(r,M->n); return r;
+}
+static inline n128 mdbl(n128 x,const n128 n){ x=dbl128(x); if(ge128(x,n)) x=sub128(x,n); return x; }
+static void mont_init(mont*M,n128 n,int need_r2){
+  M->n=n; uint64_t x=n.lo; for(int i=0;i<5;i++) x*=2-n.lo*x; M->ninv=(uint64_t)0-x;
+  n128 r=mk(1); for(int i=0;i<128;i++) r=mdbl(r,n); M->one=r;
+  if(need_r2){ for(int i=0;i<128;i++) r=mdbl(r,n); M->r2=r; }
+}
+static inline int bitlen128(n128 a){ int b=0; uint64_t w=a.hi?a.hi:a.lo; int base=a.hi?64:0; while(w){b++;w>>=1;} return b?base+b:0; }
+static inline int bit128(n128 a,int i){ return i>=64?(int)((a.hi>>(i-64))&1):(int)((a.lo>>i)&1); }
+// Fermat taban 2: 2^(n-1) = 1 (mod n), n tek, n > 2
+static int fermat2(n128 n){
+  mont M; mont_init(&M,n,0); n128 e=sub_u(n,1); int L=bitlen128(e);
+  n128 x=mdbl(M.one,n);
+  for(int i=L-2;i>=0;i--){ x=mmul(x,x,&M); if(bit128(e,i)) x=mdbl(x,n); }
+  return eq128(x,M.one);
+}
+static uint64_t mod128_u(n128 n,uint64_t p){ uint64_t t=(UINT64_MAX%p+1)%p; return (uint64_t)((((n.hi%p)*t)%p+n.lo%p)%p); }
+// Miller-Rabin, ilk 20 asal taban (n < 3.3e24 icin ilk 13 taban kesin; ustu olasiliksal, yaniltma ihtimali ihmal edilebilir)
+static int isp(n128 n){
+  static const int sp[20]={2,3,5,7,11,13,17,19,23,29,31,37,41,43,47,53,59,61,67,71};
+  if(n.hi==0&&n.lo<2) return 0;
+  for(int i=0;i<20;i++){ if(n.hi==0&&n.lo==(uint64_t)sp[i]) return 1; if(mod128_u(n,(uint64_t)sp[i])==0) return 0; }
+  if(n.hi==0&&n.lo<73ULL*73ULL) return 1;
+  mont M; mont_init(&M,n,1); n128 d=sub_u(n,1); int s=0;
+  while(!bit128(d,0)){ d.lo=(d.lo>>1)|(d.hi<<63); d.hi>>=1; s++; }
+  n128 negone=sub128(n,M.one); int L=bitlen128(d);
+  for(int b=0;b<20;b++){
+    n128 am=mmul(mk((uint64_t)sp[b]),M.r2,&M), x=M.one;
+    for(int i=L-1;i>=0;i--){ x=mmul(x,x,&M); if(bit128(d,i)) x=mmul(x,am,&M); }
+    if(eq128(x,M.one)||eq128(x,negone)) continue;
+    int ok=0; for(int r=1;r<s;r++){ x=mmul(x,x,&M); if(eq128(x,negone)){ok=1;break;} }
+    if(!ok) return 0; }
+  return 1;
+}
+static int consecutive(n128 x,const int*pt,int n){ for(int i=0;i+1<n;i++) for(int d=pt[i]+2;d<pt[i+1];d+=2){ if(isp(add_u(x,(uint64_t)d))) return 0; } return 1; }
 // genel dogrulama: merkez desen (pc,nc) X'te; tam desen (pf,nf) X-off'ta baslar
 // donus: 0 = merkez degil, 1 = merkez (ardisik), 2 = tam desen de ardisik asal
-static int verify_gen(u128 X,const int*pc,int nc,const int*pf,int nf,int off){
-  mpz_t x,t,y; mpz_init(x); mpz_init(t); mpz_init(y); u128_to_mpz(x,X); int res=0, ok=1;
-  for(int i=0;i<nc&&ok;i++){ mpz_add_ui(t,x,pc[i]); if(!isp(t)) ok=0; }
-  if(ok && consecutive(x,pc,nc,t)){ res=1; mpz_sub_ui(y,x,off); int f=1;
-    for(int i=0;i<nf&&f;i++){ mpz_add_ui(t,y,pf[i]); if(!isp(t)) f=0; }
-    if(f && consecutive(y,pf,nf,t)) res=2; }
-  mpz_clear(x); mpz_clear(t); mpz_clear(y); return res;
+static int verify_gen(n128 X,const int*pc,int nc,const int*pf,int nf,int off){
+  int res=0, ok=1;
+  for(int i=0;i<nc&&ok;i++){ if(!isp(add_u(X,(uint64_t)pc[i]))) ok=0; }
+  if(ok && consecutive(X,pc,nc)){ res=1; n128 y=sub_u(X,(uint64_t)off); int f=1;
+    for(int i=0;i<nf&&f;i++){ if(!isp(add_u(y,(uint64_t)pf[i]))) f=0; }
+    if(f && consecutive(y,pf,nf)) res=2; }
+  return res;
 }
 // donus: 0 = merkez 11'li degil; aksi halde en uzun simetrik ardisik uzanti uzunlugu (11,13,...,27)
-static int verify(u128 X){
-  mpz_t x,t,y; mpz_init(x); mpz_init(t); mpz_init(y); u128_to_mpz(x,X); int L=0, ok=1;
-  for(int i=0;i<11&&ok;i++){ mpz_add_ui(t,x,pt11[i]); if(!isp(t)) ok=0; }
-  if(ok && consecutive(x,pt11,11,t)){ L=11; mpz_sub_ui(y,x,132);
+static int verify(n128 X){
+  int L=0, ok=1;
+  for(int i=0;i<11&&ok;i++){ if(!isp(add_u(X,(uint64_t)pt11[i]))) ok=0; }
+  if(ok && consecutive(X,pt11,11)){ L=11; n128 y=sub_u(X,132);
     for(int h=6;h<=13;h++){ int a=pt27[13-h], b=pt27[13+h]; int f=1;
-      mpz_add_ui(t,y,a); if(!isp(t)) f=0;
-      if(f){ mpz_add_ui(t,y,b); if(!isp(t)) f=0; }
-      for(int d=a+2;f&&d<pt27[14-h];d+=2){ mpz_add_ui(t,y,d); if(isp(t)) f=0; }
-      for(int d=pt27[12+h]+2;f&&d<b;d+=2){ mpz_add_ui(t,y,d); if(isp(t)) f=0; }
+      if(!isp(add_u(y,(uint64_t)a))) f=0;
+      if(f && !isp(add_u(y,(uint64_t)b))) f=0;
+      for(int d=a+2;f&&d<pt27[14-h];d+=2){ if(isp(add_u(y,(uint64_t)d))) f=0; }
+      for(int d=pt27[12+h]+2;f&&d<b;d+=2){ if(isp(add_u(y,(uint64_t)d))) f=0; }
       if(!f) break; L=2*h+1; } }
-  mpz_clear(x); mpz_clear(t); mpz_clear(y); return L;
+  return L;
 }
 // sonuc dosyasi: once tum 11'liler ("X,"), sonra 13..27'li uzantilar ("X: offsetler")
-static u128 parse128(const char*s){ u128 v=0; while(*s>='0'&&*s<='9') v=v*10+(*s++-'0'); return v; }
 static void write_hits(FILE*fo,char (*H)[160],int n){
   for(int i=0;i<n;i++){ char s[64]; sscanf(H[i],"%63s",s); fprintf(fo,"%s,\n",s); }
   for(int L=13;L<=27;L+=2){ int h=(L-1)/2, first=1;
     for(int i=0;i<n;i++){ char s[64]; int l; sscanf(H[i],"%63s %d",s,&l); if(l<L) continue;
       if(first){ fprintf(fo,"%d-tuplet\n",L); first=0; }
-      u128 st=parse128(s)-132+pt27[13-h]; char t[64]; pr128(t,st); fprintf(fo,"%s: ",t);
+      n128 st=add_u(sub_u(parse128(s),132),(uint64_t)pt27[13-h]); char t[64]; pr128(t,st); fprintf(fo,"%s: ",t);
       for(int j=13-h;j<=13+h;j++) fprintf(fo,"%d%s",pt27[j]-pt27[13-h],j<13+h?", ":"\n"); } }
 }
 static int nthreads=1;
@@ -135,7 +205,6 @@ static int load_ckpt(const char*cp){
 // ---- is parcacigi: parca basina k dongusu ----
 static void *worker(void*arg){
   (void)arg; uint32_t*ix=malloc(nd*4); uint64_t*acc=malloc(words*8),*dv=malloc(nd*8);
-  mpz_t x,t,ta,te,tr; mpz_init(x); mpz_init(t); mpz_init(ta); mpz_init(te); mpz_init(tr);
   for(;;){
     pthread_mutex_lock(&mu);
     while(next_chunk<nchunks && next_chunk-committed>=RING) pthread_cond_wait(&cv,&mu);
@@ -150,12 +219,12 @@ static void *worker(void*arg){
       for(size_t j=0;j<m;j++) dv[j]=dob[ix[j]];
       for(int p=nbit;p<np && m;p++){
         uint32_t qq=pr[p]; uint64_t cc=((k%qq)*pmod[p])%qq; const uint64_t*B=bb[p]; uint64_t mg=pmg[p]; size_t n2=0;
-        for(size_t j=0;j<m;j++){ uint64_t v=dv[j]; uint64_t qt=(uint64_t)(((u128)v*mg)>>64); uint64_t r=v-qt*qq+cc; r-=(r>=qq)?qq:0; dv[n2]=v; n2+=!((B[r>>6]>>(r&63))&1); }
+        for(size_t j=0;j<m;j++){ uint64_t v=dv[j]; uint64_t qt=mulhi64(v,mg); uint64_t r=v-qt*qq+cc; r-=(r>=qq)?qq:0; dv[n2]=v; n2+=!((B[r>>6]>>(r&63))&1); }
         m=n2; }
       ls+=m;
       for(size_t j=0;j<m;j++){
-        u128 X=(u128)k*P37+dv[j]; u128_to_mpz(x,X);
-        int ok=1; for(int i=0;i<11&&ok;i++){ mpz_add_ui(t,x,pt11[i]); ok=fermat2(t,ta,te,tr); if(i==0&&ok) lf++; }
+        n128 X=mkX(k,dv[j]);
+        int ok=1; for(int i=0;i<11&&ok;i++){ ok=fermat2(add_u(X,(uint64_t)pt11[i])); if(i==0&&ok) lf++; }
         if(ok){ int v=verify(X); if(v){ if(lh==cap){ cap=cap?cap*2:4; H=realloc(H,(size_t)cap*160); } char s[64]; pr128(s,X); snprintf(H[lh++],160,"%s %d",s,v); } }
       }
     }
@@ -166,7 +235,7 @@ static void *worker(void*arg){
       free(c->h); c->h=NULL; c->ready=0; committed++; }
     pthread_cond_broadcast(&cv); pthread_mutex_unlock(&mu);
   }
-  mpz_clear(x); mpz_clear(t); mpz_clear(ta); mpz_clear(te); mpz_clear(tr); free(ix); free(acc); free(dv); return NULL;
+  free(ix); free(acc); free(dv); return NULL;
 }
 static int want_ckpt(void){
 #ifdef USE_BOINC
