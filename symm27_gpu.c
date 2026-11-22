@@ -1,19 +1,42 @@
 // Symmetric 27-tuplets - OpenCL (GPU) surumu
 // symm27.c ile ayni girdi/cikti/checkpoint bicimi; cikti CPU surumuyle birebir ayni olmalidir.
-// Eleme + Fermat testi GPU'da (96 bit Montgomery); kesin dogrulama GMP ile CPU'da.
-// Derleme: make gpu    Kullanim: ./symm27_gpu in out checkpoint [--device N]
+// Eleme + Fermat testi GPU'da (96 bit Montgomery); kesin dogrulama CPU'da (kendi 128-bit aritmetigi).
+// Derleme: make gpu (cl_dynload.c ile)   Kullanim: ./symm27_gpu in out checkpoint [--device N]
 #define main cpu_main
 #include "symm27.c"
 #undef main
-#ifdef __APPLE__
 #define CL_SILENCE_DEPRECATION
-#include <OpenCL/opencl.h>
+#include "cl_dynload.h"   // OpenCL surucusu calisma aninda yuklenir (derleme zamaninda -lOpenCL yok)
+#define clGetPlatformIDs cl_api.GetPlatformIDs
+#define clGetDeviceIDs cl_api.GetDeviceIDs
+#define clGetDeviceInfo cl_api.GetDeviceInfo
+#define clCreateContext cl_api.CreateContext
+#define clCreateCommandQueue cl_api.CreateCommandQueue
+#define clCreateProgramWithSource cl_api.CreateProgramWithSource
+#define clBuildProgram cl_api.BuildProgram
+#define clGetProgramBuildInfo cl_api.GetProgramBuildInfo
+#define clCreateKernel cl_api.CreateKernel
+#define clCreateBuffer cl_api.CreateBuffer
+#define clEnqueueWriteBuffer cl_api.EnqueueWriteBuffer
+#define clSetKernelArg cl_api.SetKernelArg
+#define clEnqueueNDRangeKernel cl_api.EnqueueNDRangeKernel
+#define clFinish cl_api.Finish
+#define clEnqueueReadBuffer cl_api.EnqueueReadBuffer
+#define clFlush cl_api.Flush
+#define clWaitForEvents cl_api.WaitForEvents
+#define clReleaseEvent cl_api.ReleaseEvent
+#define clGetEventProfilingInfo cl_api.GetEventProfilingInfo
+#ifndef EXPECTED_GPU_VENDOR
+#define EXPECTED_GPU_VENDOR ""   // "nvidia", "amd", "intel" ... ; bos = hepsi
+#endif
+#ifdef USE_BOINC
+#define LYRA_EXIT(c) boinc_finish(c)
 #else
-#include <CL/cl.h>
+#define LYRA_EXIT(c) exit(c)
 #endif
 #include <sys/time.h>
 
-#define CK(x) do{ cl_int e_=(x); if(e_!=CL_SUCCESS){ fprintf(stderr,"OpenCL hata %d (%s:%d)\n",e_,__FILE__,__LINE__); exit(5);} }while(0)
+#define CK(x) do{ cl_int e_=(x); if(e_!=CL_SUCCESS){ fprintf(stderr,"OpenCL hata %d (%s:%d)\n",e_,__FILE__,__LINE__); LYRA_EXIT(5);} }while(0)
 
 static const char *KSRC =
 "#define P37 7420738134810UL\n"
@@ -98,9 +121,12 @@ int main(int argc,char**argv){
   uint64_t*bits=malloc(tw*8); for(int p=0;p<np;p++) memcpy(bits+boff[p],bb[p],((pr[p]+63)/64)*8);
   uint32_t*prv=malloc(np*4); for(int p=0;p<np;p++) prv[p]=pr[p];
     // ---- OpenCL ----
-  cl_platform_id pl[4]; cl_uint npl=0; CK(clGetPlatformIDs(4,pl,&npl)); cl_device_id ds[16]; cl_uint nds=0;
-  for(cl_uint i=0;i<npl;i++){ cl_device_id d[8]; cl_uint n=0; if(clGetDeviceIDs(pl[i],CL_DEVICE_TYPE_GPU,8,d,&n)==CL_SUCCESS) for(cl_uint j=0;j<n&&nds<16;j++) ds[nds++]=d[j]; }
-  if(!nds||dev>=(int)nds){ fprintf(stderr,"GPU bulunamadi\n"); return 4; }
+  if(!cl_dynload_init()){ fprintf(stderr,"OpenCL surucusu bulunamadi\n"); LYRA_EXIT(3); }
+  cl_platform_id pl[8]; cl_uint npl=0; if(clGetPlatformIDs(8,pl,&npl)!=CL_SUCCESS||!npl){ fprintf(stderr,"OpenCL platformu yok\n"); LYRA_EXIT(3); }
+  cl_device_id ds[16]; cl_uint nds=0;
+  for(cl_uint i=0;i<npl&&i<8;i++){ if(!cl_platform_matches_vendor(pl[i],EXPECTED_GPU_VENDOR)) continue; cl_device_id d[8]; cl_uint n=0; if(clGetDeviceIDs(pl[i],CL_DEVICE_TYPE_GPU,8,d,&n)==CL_SUCCESS) for(cl_uint j=0;j<n&&j<8&&nds<16;j++) ds[nds++]=d[j]; }
+  if(!nds||dev>=(int)nds){ fprintf(stderr,"GPU bulunamadi (%s)\n",EXPECTED_GPU_VENDOR[0]?EXPECTED_GPU_VENDOR:"hepsi"); LYRA_EXIT(4); }
+  dev=cl_pick_vendor_device(ds,nds,dev,EXPECTED_GPU_VENDOR);
   char dn[256]; clGetDeviceInfo(ds[dev],CL_DEVICE_NAME,256,dn,0); fprintf(stderr,"GPU: %s\n",dn);
   // yigin boyutu GPU belleginden: bchv parca (bchv*CH k) / yigin; adaylar icin capv girdilik 4 liste
   cl_ulong gmem=0; clGetDeviceInfo(ds[dev],CL_DEVICE_GLOBAL_MEM_SIZE,8,&gmem,0);
@@ -119,7 +145,7 @@ int main(int argc,char**argv){
 #define PROF(i) do{ if(ev){ clReleaseEvent(ev); ev=0; } }while(0)
 #endif
   cl_program prg=clCreateProgramWithSource(ctx,1,&KSRC,0,&er); CK(er);
-  if(clBuildProgram(prg,1,&ds[dev],"",0,0)!=CL_SUCCESS){ char log[8192]; clGetProgramBuildInfo(prg,ds[dev],CL_PROGRAM_BUILD_LOG,sizeof log,log,0); fprintf(stderr,"derleme hatasi:\n%s\n",log); return 6; }
+  if(clBuildProgram(prg,1,&ds[dev],"",0,0)!=CL_SUCCESS){ char log[8192]; clGetProgramBuildInfo(prg,ds[dev],CL_PROGRAM_BUILD_LOG,sizeof log,log,0); fprintf(stderr,"derleme hatasi:\n%s\n",log); LYRA_EXIT(6); }
   cl_kernel ks=clCreateKernel(prg,"sieve1",&er); CK(er); cl_kernel kseg=clCreateKernel(prg,"seg",&er); CK(er); cl_kernel kmk=clCreateKernel(prg,"mkctab",&er); CK(er); cl_kernel kfm=clCreateKernel(prg,"fermat",&er); CK(er);
   #ifndef LS
   #define LS 64
@@ -150,7 +176,7 @@ int main(int argc,char**argv){
   }
   // asal dilimleri (indeks): her dilimden sonra hayatta kalanlar sikistirilir (warp sapmasini onler)
   uint32_t segb[24]; int nseg=0; { uint32_t bnd[]={90,190,420,1000,0}; uint32_t cur=nbit; for(int i=0;;i++){ uint32_t e=bnd[i]?bnd[i]:np; if(e>(uint32_t)np) e=np; if(e>cur){ segb[nseg++]=cur; segb[nseg++]=e; cur=e; } if(!bnd[i]) break; } }
-  nseg/=2; if(nseg+1>NCNT){ fprintf(stderr,"dilim sayisi\n"); return 8; }
+  nseg/=2; if(nseg+1>NCNT){ fprintf(stderr,"dilim sayisi\n"); LYRA_EXIT(8); }
   double tg0=wall(); time_t last=time(0); size_t ls=LS; cl_uint zero=0;
   int bchc=bchv, slot=0, pend=-1; uint64_t ci_next=committed;
   for(;;){
@@ -183,7 +209,7 @@ int main(int argc,char**argv){
     if(pend>=0){
       Slot*Z=&S[pend]; CK(clWaitForEvents(4,Z->ev)); for(int i=0;i<4;i++){ clReleaseEvent(Z->ev[i]); Z->ev[i]=0; }
       if(Z->hc0>capv || Z->hcf>FINMAX || Z->hcf>Z->hc0){
-        if(bchc==1){ fprintf(stderr,"aday tamponu tasti (%u/%u)\n",Z->hc0,Z->hcf); return 7; }
+        if(bchc==1){ fprintf(stderr,"aday tamponu tasti (%u/%u)\n",Z->hc0,Z->hcf); LYRA_EXIT(7); }
         fprintf(stderr,"uyari: aday tamponu tasti (%u/%u), parca kucultuluyor\n",Z->hc0,Z->hcf);
         clFinish(q); if(snew>=0) for(int i=0;i<4;i++) if(S[snew].ev[i]){ clReleaseEvent(S[snew].ev[i]); S[snew].ev[i]=0; }
         ci_next=Z->ci; pend=-1; bchc=bchc/2; if(bchc<1) bchc=1; slot=0; continue; }
@@ -207,7 +233,7 @@ int main(int argc,char**argv){
   }
   double tt=wall()-tg0; uint64_t kdone=(k1-k0+1);
   fprintf(stderr,"GPU: %.2f s k/s=%.0f\n",tt,kdone/tt);
-  FILE*fo=fopen(outp,"w"); if(!fo) return 2;
+  FILE*fo=fopen(outp,"wb"); if(!fo) LYRA_EXIT(2);
   fprintf(fo,"symm27 v%d k=[%llu,%llu] dobs=%zu surv=%llu fermat1=%llu hits=%d\n",APPVER,(unsigned long long)k0,(unsigned long long)k1,nd,(unsigned long long)surv,(unsigned long long)fpass,nh);
   write_hits(fo,hits,nh);
   fclose(fo); remove(cp);

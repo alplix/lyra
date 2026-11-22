@@ -16,7 +16,7 @@ The output is deterministic and independent of thread count and of CPU or GPU, s
 ## Programs
 
 - `symm27.c`: CPU version, one process, `--nthreads N` threads sharing the sieve tables (about 150 MB RAM). Checkpointing, optional BOINC API (`-DUSE_BOINC`).
-- `symm27_gpu.c`: OpenCL version with the same input, output and checkpoint format. Memory-adaptive batch size.
+- `symm27_gpu.c`: OpenCL version with the same input, output and checkpoint format. Memory-adaptive batch size. The OpenCL library is loaded at run time (`cl_dynload.c`), so the binary starts, and exits with a clear message, on hosts without an OpenCL driver. `--device N` selects the GPU; `-DEXPECTED_GPU_VENDOR=\"nvidia|amd|intel\"` restricts it to one vendor.
 - `test_verify.c`: unit tests for the verification code. `test_arith.c`: cross-checks the 128-bit arithmetic against GMP (test only; needs GMP).
 - `gendob.py`: reference generator for the `dob` residues.
 
@@ -51,3 +51,5 @@ GPL-3.0
 ## Release builds
 
 `tools/build_boinc_target.sh` compiles the BOINC libraries (from a BOINC source tree) and Lyra for one target, fully static for Linux and Windows; `tools/build_all_targets.sh` runs it for Linux x86_64, i686, aarch64, armhf, ppc64le, riscv64 and Windows x86_64, x86 (paths such as `/root/boinc` and `/opt/llvm-mingw` are those of the build container). Windows arm64 uses llvm-mingw, Android aarch64 the NDK (dynamic PIE, needs only libc, libm, libdl), macOS builds use Apple clang with `-mmacosx-version-min=11.0`. All builds print the same result file for the same input. Result files are written in binary mode, so they are byte-identical on every platform.
+
+GPU release builds: Linux x86_64 is built in an Ubuntu 20.04 chroot (glibc 2.31, the binaries need GLIBC 2.29 or newer; libstdc++ and libgcc are linked statically) by `tools/build_gpu_linux_focal.sh`, Windows x86_64 with mingw-w64 by `tools/build_gpu_windows.sh`, macOS arm64 with Apple clang. Output is byte-identical to the CPU version.
