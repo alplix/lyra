@@ -1,0 +1,21 @@
+<!-- Add the <task> inside <tasks>, the two <daemon> blocks inside <daemons> of config.xml.
+     Credit: --credit_by_plan_class <GPU> <CPU>  = credit per validated work unit. CHOOSE YOUR VALUES (we used 1000 500). -->
+<task>
+  <period>5 min</period>
+  <output>lyra_generator.out</output>
+  <cmd>lyra_generator.py</cmd>
+  <disabled>0</disabled>
+</task>
+<daemon>
+  <cmd>script_validator -d 3 --app lyra --init_script lyra_validate.sh --compare_script lyra_compare.sh --credit_by_plan_class 1000 500</cmd>
+  <pid_file>script_validator_lyra.pid</pid_file>
+  <lock_file>script_validator_lyra.lock</lock_file>
+  <output>script_validator_lyra.log</output>
+</daemon>
+<daemon>
+  <cmd>script_assimilator -d 3 --app lyra --script lyra_assimilate.sh</cmd>
+  <pid_file>script_assimilator_lyra.pid</pid_file>
+  <lock_file>script_assimilator_lyra.lock</lock_file>
+  <output>script_assimilator_lyra.log</output>
+</daemon>
+<!-- Also add to project.xml:  <app><name>lyra</name><user_friendly_name>Lyra (symmetric 27-tuplet search)</user_friendly_name></app> -->

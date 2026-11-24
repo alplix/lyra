@@ -1,0 +1,7 @@
+<version>
+    <file>
+        <physical_name>lyra_opencl_v2_macos_arm64_apple</physical_name>
+        <main_program/>
+    </file>
+    <plan_class>opencl_apple_gpu</plan_class>
+</version>

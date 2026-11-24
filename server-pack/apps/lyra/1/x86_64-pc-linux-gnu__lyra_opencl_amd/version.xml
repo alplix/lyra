@@ -1,0 +1,7 @@
+<version>
+    <file>
+        <physical_name>lyra_opencl_v2_linux_x86_64_amd</physical_name>
+        <main_program/>
+    </file>
+    <plan_class>lyra_opencl_amd</plan_class>
+</version>

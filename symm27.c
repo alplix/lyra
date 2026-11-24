@@ -253,14 +253,22 @@ int main(int argc,char**argv){
 #ifdef USE_BOINC
   int rc=boinc_init(); if(rc) return rc;
 #endif
+  int nt_set=0;
   for(int i=1;i<argc;i++){
-    if(!strcmp(argv[i],"--nthreads")||!strcmp(argv[i],"-nthreads")){ if(i+1<argc) nthreads=atoi(argv[++i]); }
-    else if(np_<3) pos[np_++]=argv[i];
+    const char*a_=argv[i]; if(!a_[0]) continue;
+    if(!strcmp(a_,"--nthreads")||!strcmp(a_,"-nthreads")){ if(i+1<argc){ nthreads=atoi(argv[++i]); nt_set=1; } }
+    else if(!strncmp(a_,"--nthreads=",11)){ nthreads=atoi(a_+11); nt_set=1; }
+#ifndef USE_BOINC
+    else if(np_<3) pos[np_++]=a_;
+#endif
   }
+#ifdef USE_BOINC
+  if(!nt_set){ FILE*f=fopen("init_data.xml","r"); if(f){ char ln[512]; while(fgets(ln,sizeof ln,f)){ char*p=strstr(ln,"<ncpus>"); if(p){ double v=atof(p+7); if(v>=1) nthreads=(int)(v+0.5); break; } } fclose(f); } }
+#endif
   if(nthreads<1) nthreads=1; if(nthreads>64) nthreads=64;
   rpath(pos[0],inp,sizeof inp); rpath(pos[1],outp,sizeof outp); rpath(pos[2],cp,sizeof cp);
   FILE*fi=fopen(inp,"r"); unsigned long long a,b;
-  if(!fi||fscanf(fi,"%llu %llu",&a,&b)!=2||a>b){ fprintf(stderr,"girdi okunamadi\n");
+  if(!fi||fscanf(fi,"%llu %llu",&a,&b)!=2||a>b){ { fprintf(stderr,"girdi okunamadi (%s)\n",inp); for(int i=0;i<argc;i++) fprintf(stderr," argv[%d]=[%s]\n",i,argv[i]); }
 #ifdef USE_BOINC
     boinc_finish(1);
 #endif

@@ -53,3 +53,7 @@ GPL-3.0
 `tools/build_boinc_target.sh` compiles the BOINC libraries (from a BOINC source tree) and Lyra for one target, fully static for Linux and Windows; `tools/build_all_targets.sh` runs it for Linux x86_64, i686, aarch64, armhf, ppc64le, riscv64 and Windows x86_64, x86 (paths such as `/root/boinc` and `/opt/llvm-mingw` are those of the build container). Windows arm64 uses llvm-mingw, Android aarch64 the NDK (dynamic PIE, needs only libc, libm, libdl), macOS builds use Apple clang with `-mmacosx-version-min=11.0`. All builds print the same result file for the same input. Result files are written in binary mode, so they are byte-identical on every platform.
 
 GPU release builds: Linux x86_64 is built in an Ubuntu 20.04 chroot (glibc 2.31, the binaries need GLIBC 2.29 or newer; libstdc++ and libgcc are linked statically) by `tools/build_gpu_linux_focal.sh`, Windows x86_64 with mingw-w64 by `tools/build_gpu_windows.sh`, macOS arm64 with Apple clang. Output is byte-identical to the CPU version.
+
+## Server pack
+`server-pack/` has ready binaries (CPU lyra_mt v3 for Linux/Windows/macOS/Android, OpenCL GPU for NVIDIA/AMD/Intel/Apple), BOINC templates,
+work generator, validator/assimilator scripts and config snippets. See `server-pack/README.md` (the installer is untested on a fresh server).

@@ -1,0 +1,7 @@
+<!-- Add these <plan_class> blocks inside <plan_classes> of your plan_class_spec.xml -->
+<plan_class><name>lyra_opencl_nvidia</name><gpu_type>nvidia</gpu_type><opencl/><avg_ncpus>1.0</avg_ncpus><cpu_frac>0.5</cpu_frac><min_gpu_ram_mb>1000</min_gpu_ram_mb><gpu_peak_flops_scale>0.2</gpu_peak_flops_scale></plan_class>
+<plan_class><name>lyra_opencl_amd</name><gpu_type>amd</gpu_type><opencl/><avg_ncpus>1.0</avg_ncpus><cpu_frac>0.5</cpu_frac><min_gpu_ram_mb>1000</min_gpu_ram_mb><gpu_peak_flops_scale>0.2</gpu_peak_flops_scale></plan_class>
+<plan_class><name>lyra_opencl_intel</name><gpu_type>intel</gpu_type><opencl/><avg_ncpus>1.0</avg_ncpus><cpu_frac>0.5</cpu_frac><min_gpu_ram_mb>1000</min_gpu_ram_mb><gpu_peak_flops_scale>0.08</gpu_peak_flops_scale></plan_class>
+<plan_class><name>opencl_apple_gpu</name><gpu_type>apple</gpu_type><opencl/><avg_ncpus>1.0</avg_ncpus><cpu_frac>0.5</cpu_frac><min_gpu_ram_mb>1000</min_gpu_ram_mb></plan_class>
+<!-- CPU: one multi-threaded process, up to 4 threads, BOINC reserves that many cores -->
+<plan_class><name>lyra_mt</name><max_threads>4</max_threads><nthreads_cmdline/><mem_usage_base_mb>80</mem_usage_base_mb><mem_usage_per_cpu_mb>20</mem_usage_per_cpu_mb></plan_class>
